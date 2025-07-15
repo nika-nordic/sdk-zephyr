@@ -22,6 +22,8 @@
 #ifdef CONFIG_SOC_NRF5340_CPUAPP
 #include <hal/nrf_clock.h>
 #endif
+
+#include <haly/nrfy_spim.h>
 #include <nrfx_spim.h>
 #include <string.h>
 #include <zephyr/linker/devicetree_regions.h>
@@ -32,6 +34,31 @@ LOG_MODULE_REGISTER(spi_nrfx_spim, CONFIG_SPI_LOG_LEVEL);
 
 #include "spi_context.h"
 #include "spi_nrfx_common.h"
+
+#define SPI_PROFILE_TIMINGS 1
+
+#if NRFX_CHECK(SPI_PROFILE_TIMINGS)
+#if defined(NRF54H20_XXAA)
+#define SPI_PROFILING_PORT NRF_P0
+#define SPI_PROFILING_PIN  11
+#elif defined(NRF54L15_XXAA)
+#define SPI_PROFILING_PORT NRF_P1
+#define SPI_PROFILING_PIN  14
+#elif defined(NRF52840_XXAA)
+#define SPI_PROFILING_PORT NRF_P1
+#define SPI_PROFILING_PIN  1
+#else
+#error "Debug pin not defined"
+#endif
+#endif
+
+#if NRFX_CHECK(SPI_PROFILE_TIMINGS)
+#define SPI_PROFILE_PIN_HIGH() nrf_gpio_port_pin_write(SPI_PROFILING_PORT, SPI_PROFILING_PIN, 1); (void)nrf_gpio_port_pin_read(SPI_PROFILING_PORT, SPI_PROFILING_PIN)
+#define SPI_PROFILE_PIN_LOW() nrf_gpio_port_pin_write(SPI_PROFILING_PORT, SPI_PROFILING_PIN, 0); (void)nrf_gpio_port_pin_read(SPI_PROFILING_PORT, SPI_PROFILING_PIN)
+#else
+#define SPI_PROFILE_PIN_HIGH()
+#define SPI_PROFILE_PIN_LOW()
+#endif
 
 #if defined(CONFIG_SOC_NRF52832) && !defined(CONFIG_SOC_NRF52832_ALLOW_SPIM_DESPITE_PAN_58)
 #error  This driver is not available by default for nRF52832 because of Product Anomaly 58 \
@@ -153,9 +180,11 @@ static inline void finalize_spi_transaction(const struct device *dev, bool deact
 	const struct spi_nrfx_config *dev_config = dev->config;
 	void *reg = dev_config->spim.p_reg;
 
+	SPI_PROFILE_PIN_LOW(); //in finalize
 	if (deactivate_cs) {
 		spi_context_cs_control(&dev_data->ctx, false);
 	}
+	SPI_PROFILE_PIN_HIGH(); // cs control
 
 	if (NRF_SPIM_IS_320MHZ_SPIM(reg) && !(dev_data->ctx.config->operation & SPI_HOLD_ON_CS)) {
 		nrfy_spim_disable(reg);
@@ -164,6 +193,8 @@ static inline void finalize_spi_transaction(const struct device *dev, bool deact
 	if (!IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)) {
 		release_clock(dev);
 	}
+
+	SPI_PROFILE_PIN_LOW(); // clock release
 
 	pm_device_runtime_put_async(dev, K_NO_WAIT);
 }
@@ -400,7 +431,9 @@ static void finish_transaction(const struct device *dev, int error)
 
 	LOG_DBG("Transaction finished with status %d", error);
 
+	SPI_PROFILE_PIN_LOW(); // in finish
 	spi_context_complete(ctx, dev, error);
+	SPI_PROFILE_PIN_HIGH(); // k_sem_give
 	dev_data->busy = false;
 
 	if (dev_data->ctx.config->operation & SPI_LOCK_ON) {
@@ -439,8 +472,10 @@ static void transfer_next_chunk(const struct device *dev)
 			}
 
 			memcpy(dev_data->tx_buffer, tx_buf, chunk_len);
+			SPI_PROFILE_PIN_LOW(); //memcpy
 #ifdef CONFIG_DCACHE
 			if (dev_config->mem_attr & DT_MEM_CACHEABLE) {
+
 				sys_cache_data_flush_range(dev_data->tx_buffer, chunk_len);
 			}
 #endif
@@ -477,7 +512,10 @@ static void transfer_next_chunk(const struct device *dev)
 		}
 #endif
 		if (error == 0) {
-			result = nrfx_spim_xfer(&dev_config->spim, &xfer, 0);
+			SPI_PROFILE_PIN_HIGH(); //dcache flush
+			result = nrfx_spim_xfer(&dev_config->spim, &xfer, NRFX_SPIM_FLAG_HOLD_XFER);
+			SPI_PROFILE_PIN_LOW(); //nrfx_spim_xfer
+			nrf_spim_task_trigger(dev_config->spim.p_reg, NRF_SPIM_TASK_START);
 			if (result == NRFX_SUCCESS) {
 				return;
 			}
@@ -493,6 +531,7 @@ static void transfer_next_chunk(const struct device *dev)
 
 static void event_handler(const nrfx_spim_evt_t *p_event, void *p_context)
 {
+	SPI_PROFILE_PIN_HIGH(); // irq
 	const struct device *dev = p_context;
 	struct spi_nrfx_data *dev_data = dev->data;
 #ifdef CONFIG_DCACHE
@@ -520,9 +559,11 @@ static void event_handler(const nrfx_spim_evt_t *p_event, void *p_context)
 				sys_cache_data_invd_range(dev_data->rx_buffer, dev_data->chunk_len);
 			}
 #endif
+			SPI_PROFILE_PIN_LOW(); // cache invalidate
 			(void)memcpy(dev_data->ctx.rx_buf,
 				     dev_data->rx_buffer,
 				     dev_data->chunk_len);
+			SPI_PROFILE_PIN_HIGH(); // memcpy
 		}
 #endif
 		spi_context_update_tx(&dev_data->ctx, 1, dev_data->chunk_len);
@@ -545,14 +586,25 @@ static int transceive(const struct device *dev,
 	void *reg = dev_config->spim.p_reg;
 	int error;
 
+	SPI_PROFILE_PIN_HIGH();
+	SPI_PROFILE_PIN_LOW();
+	SPI_PROFILE_PIN_HIGH();
+	SPI_PROFILE_PIN_LOW();
+	SPI_PROFILE_PIN_HIGH();
+
 	pm_device_runtime_get(dev);
 	spi_context_lock(&dev_data->ctx, asynchronous, cb, userdata, spi_cfg);
 
+	SPI_PROFILE_PIN_LOW(); // pm
+
 	error = configure(dev, spi_cfg);
+	SPI_PROFILE_PIN_HIGH(); // configuration
 
 	if (error == 0 && !IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)) {
 		error = request_clock(dev);
 	}
+
+	SPI_PROFILE_PIN_LOW(); // clock
 
 	if (error == 0) {
 		dev_data->busy = true;
@@ -574,7 +626,9 @@ static int transceive(const struct device *dev,
 		if (NRF_SPIM_IS_320MHZ_SPIM(reg)) {
 			nrfy_spim_enable(reg);
 		}
+
 		spi_context_cs_control(&dev_data->ctx, true);
+		SPI_PROFILE_PIN_HIGH(); // cs control
 
 		transfer_next_chunk(dev);
 
@@ -614,6 +668,9 @@ static int transceive(const struct device *dev,
 	}
 
 	spi_context_release(&dev_data->ctx, error);
+
+	SPI_PROFILE_PIN_HIGH(); // end of transceive
+	SPI_PROFILE_PIN_LOW();
 
 	return error;
 }
@@ -730,6 +787,11 @@ static int spi_nrfx_init(const struct device *dev)
 	const struct spi_nrfx_config *dev_config = dev->config;
 	struct spi_nrfx_data *dev_data = dev->data;
 	int err;
+
+#if NRFX_CHECK(SPI_PROFILE_TIMINGS)
+	nrf_gpio_port_pin_write(SPI_PROFILING_PORT, SPI_PROFILING_PIN, 0);
+	nrf_gpio_port_pin_output_set(SPI_PROFILING_PORT, SPI_PROFILING_PIN);
+#endif
 
 	err = pinctrl_apply_state(dev_config->pcfg, PINCTRL_STATE_DEFAULT);
 	if (err < 0) {

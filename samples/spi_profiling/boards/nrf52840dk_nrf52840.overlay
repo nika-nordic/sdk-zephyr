@@ -1,0 +1,42 @@
+&pinctrl {
+	spi0_default_alt: spi0_default_alt {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 3)>,
+				<NRF_PSEL(SPIM_MISO, 0, 4)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 28)>;
+		};
+	};
+
+	spi0_sleep_alt: spi0_sleep_alt {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 3)>,
+				<NRF_PSEL(SPIM_MISO, 0, 4)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 28)>;
+			low-power-enable;
+		};
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+dut_spim: &spi3 {
+	status = "okay";
+	compatible = "nordic,nrf-spim";
+	pinctrl-0 = <&spi0_default_alt>;
+	pinctrl-1 = <&spi0_sleep_alt>;
+	pinctrl-names = "default", "sleep";
+	overrun-character = <0x00>;
+	cs-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
+	zephyr,pm-device-runtime-auto;
+	dut_spi_dt: test-spi-dev@0 {
+		compatible = "vnd,spi-device";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+	};
+};
+
+stopwatch: &timer0 {
+	status = "reserved";
+};

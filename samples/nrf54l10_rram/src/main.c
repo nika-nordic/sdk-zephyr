@@ -29,8 +29,8 @@ static void rram_test_read(uint32_t addr)
 static void rram_address_check(uint32_t addr)
 {
 	rram_test_read(addr);
-	rram_test_write(addr, 0xDEADBEEF);
-	rram_test_read(addr);
+	//rram_test_write(addr, 0xDEADBEEF);
+	//rram_test_read(addr);
 }
 
 int main(void)
@@ -42,6 +42,20 @@ int main(void)
 
 	printf("NRF_FICR->INFO.PART=0x%x\n", NRF_FICR->INFO.PART);
 
+#if 0
+	printf("MPC settings");
+	uint32_t mpc_region_config_offset = 0;
+	uint32_t mpc_region_startaddr_offset = 4;
+	uint32_t mpc_region_addrmask_offset = 8;
+	uint32_t mpc_region_array_offset = 16;
+	void * mpc_region_base = (void *)&NRF_MPC->REGION[0];
+	for (size_t i = 0; i < 7; i++) {
+		printf("MPC->REGION[%d].CONFIG=0x%x\n", ((uint8_t *)mpc_region_base + mpc_region_config_offset));
+		printf("MPC->REGION[%d].STARTADDR=0x%x\n",);
+	}
+#endif
+
+#if 0
 	uint32_t ok_addr = RRAM_BOUNDARY - 4;
 	uint32_t nok_addr = RRAM_BOUNDARY;
 
@@ -50,6 +64,68 @@ int main(void)
 
 	printf("--- Checking *not* accessible address 0x%x\n", nok_addr);
 	rram_address_check(nok_addr);
+#endif
+
+	uint32_t addr;
+
+	addr = 64 * 1024;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	//---
+
+	addr = RRAM_BOUNDARY - (20 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+	//---
+
+	addr = RRAM_BOUNDARY - (16 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+	//---
+
+	addr = RRAM_BOUNDARY - (12 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+	//---
+
+	addr = RRAM_BOUNDARY - (8 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+	//---
+
+	addr = RRAM_BOUNDARY - (4 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+	//---
+
+	addr = RRAM_BOUNDARY - (0 * 1024) - 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
+
+	addr += 4;
+	printf("--- Checking address 0x%x\n", addr);
+	rram_address_check(addr);
 
 	return 0;
 }

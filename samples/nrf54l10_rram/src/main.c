@@ -42,18 +42,26 @@ int main(void)
 
 	printf("NRF_FICR->INFO.PART=0x%x\n", NRF_FICR->INFO.PART);
 
-#if 0
-	printf("MPC settings");
+#define NRF_MPC NRF_MPC00
+	printf("MPC settings\n");
 	uint32_t mpc_region_config_offset = 0;
 	uint32_t mpc_region_startaddr_offset = 4;
 	uint32_t mpc_region_addrmask_offset = 8;
 	uint32_t mpc_region_array_offset = 16;
-	void * mpc_region_base = (void *)&NRF_MPC->REGION[0];
-	for (size_t i = 0; i < 7; i++) {
-		printf("MPC->REGION[%d].CONFIG=0x%x\n", ((uint8_t *)mpc_region_base + mpc_region_config_offset));
-		printf("MPC->REGION[%d].STARTADDR=0x%x\n",);
+	uint8_t * mpc_region_base = (uint8_t *)NRF_MPC + 0x600;
+	for (size_t i = 0; i < 8; i++) {
+		printf("MPC->REGION[%d].CONFIG=0x%x\n", i, *(uint32_t volatile *)(mpc_region_base + mpc_region_config_offset));
+		printf("MPC->REGION[%d].STARTADDR=0x%x\n", i, *(uint32_t volatile *)(mpc_region_base + mpc_region_startaddr_offset));
+		printf("MPC->REGION[%d].ADDRMASK=0x%x\n", i, *(uint32_t volatile *)(mpc_region_base + mpc_region_addrmask_offset));
+		mpc_region_base += mpc_region_array_offset;
 	}
-#endif
+	for (size_t i = 0; i < 7; i++) {
+		printf("MPC->OVERRIDE[%d].CONFIG=0x%x\n", i, NRF_MPC->OVERRIDE[i].CONFIG);
+		printf("MPC->OVERRIDE[%d].STARTADDR=0x%x\n", i, NRF_MPC->OVERRIDE[i].STARTADDR);
+		printf("MPC->OVERRIDE[%d].ENDADDR=0x%x\n", i, NRF_MPC->OVERRIDE[i].ENDADDR);
+		printf("MPC->OVERRIDE[%d].PERM=0x%x\n", i, NRF_MPC->OVERRIDE[i].PERM);
+		printf("MPC->OVERRIDE[%d].PERMMASK=0x%x\n", i, NRF_MPC->OVERRIDE[i].PERMMASK);
+	}
 
 #if 0
 	uint32_t ok_addr = RRAM_BOUNDARY - 4;

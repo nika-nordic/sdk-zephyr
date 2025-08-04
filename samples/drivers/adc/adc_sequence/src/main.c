@@ -6,6 +6,7 @@
 
 #include <zephyr/drivers/adc.h>
 #include <zephyr/kernel.h>
+#include <dmm.h>
 
 /* ADC node from the devicetree. */
 #define ADC_NODE DT_ALIAS(adc0)
@@ -25,6 +26,8 @@ static uint32_t vrefs_mv[] = {DT_FOREACH_CHILD_SEP(ADC_NODE, CHANNEL_VREF, (,))}
 
 /* Get the number of channels defined on the DTS. */
 #define CHANNEL_COUNT ARRAY_SIZE(channel_cfgs)
+
+extern uint16_t * g_my_other_dmm_buffer;
 
 int main(void)
 {
@@ -70,18 +73,29 @@ int main(void)
 	}
 
 #ifndef CONFIG_COVERAGE
-	while (1) {
+	for (int k = 0; k < 1; k++) {
 #else
 	for (int k = 0; k < 10; k++) {
 #endif
 		printf("ADC sequence reading [%u]:\n", count++);
 		k_msleep(1000);
 
+		g_my_other_dmm_buffer = NULL;
+
 		err = adc_read(adc, &sequence);
 		if (err < 0) {
 			printf("Could not read (%d)\n", err);
 			continue;
 		}
+
+		printf("my dmm buf = %p, SAADC->PTR=0x%x\n", g_my_other_dmm_buffer, NRF_SAADC->RESULT.PTR);
+		if (g_my_other_dmm_buffer) {
+			for (int i = 0; i < CHANNEL_COUNT; i++) {
+				printf("mydmmbuf[%d]=%d\n", i, g_my_other_dmm_buffer[i]);
+			}
+		}
+
+		dmm_buffer_out_release(DMM_DEV_TO_REG(DT_NODELABEL(adc)), g_my_other_dmm_buffer);
 
 		for (size_t channel_index = 0U; channel_index < CHANNEL_COUNT; channel_index++) {
 			int32_t val_mv;

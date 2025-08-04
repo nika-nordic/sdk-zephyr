@@ -124,12 +124,16 @@ static void *dmm_buffer_alloc(struct dmm_heap *dh, size_t length)
 	ret = sys_heap_aligned_alloc(&dh->heap, dh->region->dt_align, length);
 	k_spin_unlock(&dh->lock, key);
 
+	printf("dmm_alloc=%p\n", ret);
+
 	return ret;
 }
 
 static void dmm_buffer_free(struct dmm_heap *dh, void *buffer)
 {
 	k_spinlock_key_t key;
+
+	printf("dmm_free=%p\n", buffer);
 
 	key = k_spin_lock(&dh->lock);
 	sys_heap_free(&dh->heap, buffer);

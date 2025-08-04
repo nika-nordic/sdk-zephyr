@@ -385,23 +385,24 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 
 static void adc_context_update_buffer_pointer(struct adc_context *ctx, bool repeat)
 {
+	void *samples_buffer;
+
 	if (!repeat) {
-		void *samples_buffer;
-
 		m_data.user_buffer = (uint16_t *)m_data.user_buffer + m_data.active_channel_cnt;
-
-		int error = dmm_buffer_in_prepare(
-			m_data.mem_reg, m_data.user_buffer,
-			NRFX_SAADC_SAMPLES_TO_BYTES(m_data.active_channel_cnt),
-			&samples_buffer);
-		if (error != 0) {
-			LOG_ERR("DMM buffer allocation failed err=%d", error);
-			adc_context_complete(ctx, -EIO);
-		}
-#if !defined(CONFIG_HAS_NORDIC_DMM)
-		nrfx_saadc_buffer_set(samples_buffer, m_data.active_channel_cnt);
-#endif
 	}
+
+	int error = dmm_buffer_in_prepare(
+		m_data.mem_reg, m_data.user_buffer,
+		NRFX_SAADC_SAMPLES_TO_BYTES(m_data.active_channel_cnt),
+		&samples_buffer);
+	if (error != 0) {
+		LOG_ERR("DMM buffer allocation failed err=%d", error);
+		adc_context_complete(ctx, -EIO);
+	}
+//Uncomment to see failure - wrong buffer being freed
+//#if !defined(CONFIG_HAS_NORDIC_DMM)
+	nrfx_saadc_buffer_set(samples_buffer, m_data.active_channel_cnt);
+//#endif
 }
 
 static int get_resolution(const struct adc_sequence *sequence, nrf_saadc_resolution_t *resolution)
@@ -627,15 +628,29 @@ static int adc_nrfx_read_async(const struct device *dev,
 }
 #endif /* CONFIG_ADC_ASYNC */
 
+uint16_t * g_my_other_dmm_buffer;
+
 static void event_handler(const nrfx_saadc_evt_t *event)
 {
 	nrfx_err_t err;
+	static bool my_dmm_buffer_filled = false;
 
 	if (event->type == NRFX_SAADC_EVT_DONE) {
 		dmm_buffer_in_release(
 			m_data.mem_reg, m_data.user_buffer,
 			NRFX_SAADC_SAMPLES_TO_BYTES(m_data.active_channel_cnt),
 			event->data.done.p_buffer);
+
+// Other context, for example higher priority interrupt
+		if (!my_dmm_buffer_filled) {
+			my_dmm_buffer_filled = true;
+			uint16_t userbuf[10];
+			dmm_buffer_out_prepare(DMM_DEV_TO_REG(DT_NODELABEL(adc)),
+					       userbuf, sizeof(userbuf),
+					       (void **)&g_my_other_dmm_buffer);
+			memset(g_my_other_dmm_buffer, 0xAA, sizeof(userbuf));
+		}
+// end of other context
 
 		if (has_single_ended(&m_data.ctx.sequence)) {
 			correct_single_ended(&m_data.ctx.sequence, m_data.user_buffer);

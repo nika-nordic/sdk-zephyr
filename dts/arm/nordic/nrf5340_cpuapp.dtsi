@@ -34,31 +34,58 @@
 		};
 	};
 
+	/*
+	 * Clock-management view of the nRF5340 HFCLK domain, showcasing the
+	 * clock-states concept (RFC zephyrproject-rtos/zephyr#89124).
+	 *
+	 * HFINT (internal RC) and HFXO (crystal) are root clocks feeding the
+	 * HFCLK source multiplexer. Peripherals tap the multiplexer through the
+	 * "clock-output" leaf node (pclk_hf) and select their source by applying
+	 * a clock state. Both roots report the peripheral-visible frequency; they
+	 * differ only in accuracy (HFXO is crystal-accurate).
+	 */
 	clocks {
-		/* CASE_1: clock signal with frequency determined by parent clock device, not alterable by clock sink. */
-		/* `base` meaning user should look for parent clock for actual frequency. */
-		aclk: aclk {
-			compatible = "base";
-			#clock-cells = <0>; /* <{clock source device}> */
-			clocks = <&hfclkaudio>;
-		};
-
-		/* CASE_2: clock signal with static frequency.
-		 * There might be more such signals with different frequency, governed by same parent. */
-		pclk16m: pclk16m {
-			compatible = "nordic,fixed-clock", "nordic,clock-signal";
-			#clock-cells = <1>; /* <{clock source device} {clock quality}> */
+		cm_hfint: cm_hfint {
+			compatible = "nordic,nrf5340-hfint";
+			#clock-cells = <0>;
 			clock-frequency = <DT_FREQ_M(16)>;
-			clocks = <&hfclk>;
 		};
 
-		/* CASE_3: clock signal with variable frequency, alterable by clock sink. */
-		/* Not really a variable clock - this is just for showcasing */
-		pclk32m: pclk32m {
-			compatible = "nordic,variable-clock", "nordic,clock-signal";
-			#clock-cells = <2>; /* <{clock source device} {clock quality} {clock frequency}> */
-			clock-frequency = <DT_FREQ_M(32)>;
-			clocks = <&hfclk>;
+		cm_hfxo: cm_hfxo {
+			compatible = "nordic,nrf5340-hfxo";
+			#clock-cells = <0>;
+			clock-frequency = <DT_FREQ_M(16)>;
+		};
+
+		cm_hfclk: cm_hfclk {
+			compatible = "nordic,nrf5340-hfclk";
+			#clock-cells = <1>;
+			/* index 0 = HFINT (RC), index 1 = HFXO (crystal) */
+			input-sources = <&cm_hfint &cm_hfxo>;
+
+			pclk_hf: clock-output {
+				compatible = "clock-output";
+				#clock-cells = <0>;
+
+				/*
+				 * Example clock states a consumer can apply.
+				 * "xtal" drives HFCLK from the crystal (HFXO,
+				 * accurate); "rc" drives it from the internal RC
+				 * (HFINT, low power). Both produce the same
+				 * peripheral frequency.
+				 */
+				pclk_hf_xtal: state-xtal {
+					compatible = "clock-state";
+					clocks = <&cm_hfclk 1>; /* HFXO */
+					clock-frequency = <DT_FREQ_M(16)>;
+				};
+
+				pclk_hf_rc: state-rc {
+					compatible = "clock-state";
+					clocks = <&cm_hfclk 0>; /* HFINT */
+					clock-frequency = <DT_FREQ_M(16)>;
+				};
+			};
 		};
 	};
 

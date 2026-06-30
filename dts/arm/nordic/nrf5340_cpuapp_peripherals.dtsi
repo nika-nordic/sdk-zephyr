@@ -154,7 +154,8 @@ uart0: uart@8000 {
 	reg = <0x8000 0x1000>;
 	interrupts = <8 NRF_DEFAULT_IRQ_PRIORITY>;
 	status = "disabled";
-	clocks = <&pclk16m NRF_DT_CLK_DEFAULT>;
+	clock-outputs = <&pclk_hf>;
+	clock-output-names = "default";
 };
 
 i2c1: i2c@9000 {
@@ -196,7 +197,8 @@ uart1: uart@9000 {
 	reg = <0x9000 0x1000>;
 	interrupts = <9 NRF_DEFAULT_IRQ_PRIORITY>;
 	status = "disabled";
-	clocks = <&pclk16m NRF_DT_CLK_DEFAULT>;
+	clock-outputs = <&pclk_hf>;
+	clock-output-names = "default";
 };
 
 spi4: spi@a000 {

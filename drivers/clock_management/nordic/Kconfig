@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+config CLOCK_MANAGEMENT_NORDIC
+	bool "Nordic clock management drivers"
+	default y
+	depends on DT_HAS_NORDIC_NRF5340_HFXO_ENABLED || \
+		   DT_HAS_NORDIC_NRF5340_HFINT_ENABLED || \
+		   DT_HAS_NORDIC_NRF5340_HFCLK_ENABLED
+	help
+	  Enable clock management node drivers for Nordic nRF5340 clock tree
+	  (HFXO / HFINT root clocks and the HFCLK source multiplexer). These
+	  drivers showcase the clock-states concept on nRF5340.

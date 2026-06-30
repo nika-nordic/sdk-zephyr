@@ -80,6 +80,8 @@ config CLOCK_MANAGEMENT_MUX
 	  A generic mux driver where a simple bitfield will unconditionally
 	  select a clock parent.
 
+rsource "nordic/Kconfig"
+
 module = CLOCK_MANAGEMENT
 module-str = clock-management
 source "subsys/logging/Kconfig.template.log_config"

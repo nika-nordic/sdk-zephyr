@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  nRF5340 internal high-frequency RC oscillator (HFINT) as a clock-management
+  root clock node. HFINT is always available and is the default source for the
+  HFCLK domain. Modelled as a root clock that reports the peripheral-visible
+  frequency (PCLK) it produces.
+
+compatible: "nordic,nrf5340-hfint"
+
+include: [clock-node.yaml]
+
+properties:
+  clock-frequency:
+    type: int
+    required: true
+    description: Peripheral clock frequency produced by this source, in Hz
+
+  "#clock-cells":
+    const: 0

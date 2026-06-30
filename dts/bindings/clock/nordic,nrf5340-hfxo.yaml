@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  nRF5340 high-frequency crystal oscillator (HFXO) as a clock-management root
+  clock node. HFXO provides a crystal-accurate source for the HFCLK domain and
+  must be started explicitly. Modelled as a root clock that reports the
+  peripheral-visible frequency (PCLK) it produces. Starting/stopping of the
+  crystal is performed by the HFCLK multiplexer when it selects this source.
+
+compatible: "nordic,nrf5340-hfxo"
+
+include: [clock-node.yaml]
+
+properties:
+  clock-frequency:
+    type: int
+    required: true
+    description: Peripheral clock frequency produced by this source, in Hz
+
+  "#clock-cells":
+    const: 0

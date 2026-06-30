@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  nRF5340 HFCLK source multiplexer as a clock-management mux node. The HFCLK
+  domain is driven either by the internal RC oscillator (HFINT) or the crystal
+  oscillator (HFXO). Selecting HFXO causes the driver to start the crystal;
+  selecting HFINT stops it. Accepts one specifier: the zero-based index into
+  the "input-sources" phandle array.
+
+compatible: "nordic,nrf5340-hfclk"
+
+include: [clock-node.yaml]
+
+properties:
+  input-sources:
+    type: phandles
+    required: true
+    description: |
+      Input sources to the HFCLK multiplexer. Index 0 must be the internal RC
+      oscillator (HFINT), index 1 the crystal oscillator (HFXO).
+
+  "#clock-cells":
+    const: 1
+
+clock-cells:
+  - source

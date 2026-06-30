@@ -1,9 +1,18 @@
+/* Showcase of the clock-states concept on nRF5340.
+ *
+ * uart1 taps the HFCLK clock-output ("default", wired in the SoC dtsi) and
+ * defines two clock states:
+ *   - "default" (active): drive HFCLK from the crystal (HFXO) for accurate baud
+ *   - "sleep"           : drive HFCLK from the internal RC (HFINT) when idle
+ *
+ * With CONFIG_UART_NRFX_UARTE_CLOCK_MGMT_ON_ACT, the driver applies the
+ * "default" state before a transfer and the "sleep" state once the transfer
+ * completes.
+ */
 &uart1 {
-    status = "okay";
-    clocks = <&pclk16m NRF_DT_CLK_XTAL>;
-    current-speed = <9600>;
-};
-
-&hfclk {
-    status = "okay";
+	status = "okay";
+	current-speed = <9600>;
+	clock-state-0 = <&pclk_hf_xtal>;
+	clock-state-1 = <&pclk_hf_rc>;
+	clock-state-names = "default", "sleep";
 };

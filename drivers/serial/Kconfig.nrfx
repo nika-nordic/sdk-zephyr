@@ -95,30 +95,33 @@ config UART_NRFX_UARTE_DIRECT_ISR
 
 choice UART_NRFX_UARTE_CLOCK_MGMT
 	prompt "Clock management scheme"
+	depends on CLOCK_MANAGEMENT
 	default UART_NRFX_UARTE_CLOCK_MGMT_ON_PM if PM_DEVICE_RUNTIME
 	default UART_NRFX_UARTE_CLOCK_MGMT_ON_ACT
 	help
-	  Determines how the clock source specified in `clocks` property
-	  is managed by the driver.
+	  Determines when the driver applies the clock states defined for the
+	  instance (via the "clock-state-*" properties): the "default" state is
+	  applied to select the active source clock, and the "sleep" state is
+	  applied when the peripheral becomes idle.
 
 config UART_NRFX_UARTE_CLOCK_MGMT_ON_ACT
 	bool "Manage clock on peripheral activity"
 	help
-	  The clock source specified in `clocks` property is requested before each operation
-	  and released after each operation.
+	  The active clock state is applied before each operation and the sleep
+	  state is applied after each operation.
 
 config UART_NRFX_UARTE_CLOCK_MGMT_ON_PM
-	bool "Manage clock on peripheral activity"
+	bool "Manage clock on peripheral power management"
 	depends on PM_DEVICE_RUNTIME
 	help
-	  The clock source specified in `clocks` property is requested before resuming the driver
-	  and released after suspending the driver.
+	  The active clock state is applied before resuming the driver and the
+	  sleep state is applied after suspending the driver.
 
 config UART_NRFX_UARTE_CLOCK_MGMT_ON_INIT
 	bool "Manage clock on peripheral initialization"
 	help
-	  The clock source specified in `clocks` property is requested before
-	  peripheral initialization and released after peripheral uninitialization.
+	  The active clock state is applied before peripheral initialization and
+	  the sleep state is applied after peripheral uninitialization.
 
 endchoice
 

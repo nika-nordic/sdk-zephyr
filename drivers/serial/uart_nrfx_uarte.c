@@ -21,7 +21,9 @@
 #include <soc.h>
 #include <dmm.h>
 #include <helpers/nrfx_gppi.h>
-#include <zephyr/dt-bindings/clock/nrf_clocks.h>
+#ifdef CONFIG_CLOCK_MANAGEMENT
+#include <zephyr/drivers/clock_management.h>
+#endif
 #include <zephyr/linker/devicetree_regions.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
@@ -50,22 +52,17 @@ LOG_MODULE_REGISTER(uart_nrfx_uarte, CONFIG_UART_LOG_LEVEL);
 #define UARTE_FOR_EACH_ENABLED_INSTANCE(f, sep, ...) \
 	DT_FOREACH_STATUS_OKAY_VARGS(nordic_nrf_uarte, f, __VA_ARGS__)
 
-/* Determine if any instance is using non-default clock source quality specifier. */
-#define IS_CLK_QUALITY(unused, prefix, i, _) \
+/* Determine if any enabled instance uses the clock-management framework to
+ * select its source clock (i.e. defines a "clock-outputs" property and clock
+ * management is enabled).
+ */
+#define IS_CLOCK_MGMT(unused, prefix, i, _) \
 	(COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(UARTE(i)), \
-		     (CLK_ACC(UARTE(i)) != NRF_DT_CLK_DEFAULT), (0)))
+		     (DT_NODE_HAS_PROP(UARTE(i), clock_outputs)), (0)))
 
-#if UARTE_FOR_EACH_INSTANCE(IS_CLK_QUALITY, (||), (0))
-	#define UARTE_ANY_CLK_QUALITY 1
-#endif
-
-/* Determine if any instance is using clock source frequency specifier. */
-#define IS_CLK_FREQ(unused, prefix, i, _) \
-	(COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(UARTE(i)), \
-		     (DT_PHA_HAS_CELL_AT_IDX(UARTE(i), clocks, 0, frequency)), (0)))
-
-#if UARTE_FOR_EACH_INSTANCE(IS_CLK_FREQ, (||), (0))
-	#define UARTE_ANY_CLK_FREQ 1
+#if defined(CONFIG_CLOCK_MANAGEMENT) && \
+	UARTE_FOR_EACH_INSTANCE(IS_CLOCK_MGMT, (||), (0))
+	#define UARTE_ANY_CLOCK_MGMT 1
 #endif
 
 /* Determine if any instance is using interrupt driven API. */
@@ -150,7 +147,7 @@ LOG_MODULE_REGISTER(uart_nrfx_uarte, CONFIG_UART_LOG_LEVEL);
 
 #define INSTANCE_IS_HIGH_SPEED(unused, prefix, idx, _) \
 	COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(UARTE(prefix##idx)),				\
-	    ((CLK_SRC_FRQ(UARTE(prefix##idx)) > NRF_UARTE_BASE_FREQUENCY_16MHZ)),		\
+	    ((NRF_PERIPH_GET_FREQUENCY(UARTE(prefix##idx)) > NRF_UARTE_BASE_FREQUENCY_16MHZ)),	\
 	    (0))
 
 /* Macro determines if there is any high speed instance (instance that is driven using
@@ -420,12 +417,13 @@ struct uarte_nrfx_config {
 #endif /* UARTE_ANY_ASYNC */
 	uint8_t *poll_out_byte;
 	uint8_t *poll_in_byte;
-#ifdef UARTE_ANY_CLK_QUALITY
-	const struct device * clk_dev;
-	int16_t clk_acc;
-#ifdef UARTE_ANY_CLK_FREQ
-	uint32_t clk_frq;
-#endif
+#ifdef UARTE_ANY_CLOCK_MGMT
+	/* Clock output the instance taps, and the states it applies when the
+	 * peripheral is active vs. idle (clock-states showcase).
+	 */
+	const struct clock_output *clk_out;
+	clock_management_state_t clk_state_active;
+	clock_management_state_t clk_state_sleep;
 #endif
 };
 
@@ -1737,32 +1735,25 @@ static bool has_hwfc(const struct device *dev)
 #endif
 }
 
+/*
+ * Apply the "active" clock state for this instance, selecting the source clock
+ * configured by the consumer (e.g. the crystal oscillator for accurate baud).
+ *
+ * NOTE: applying a clock state may start a source clock (HFXO), which is a
+ * lengthy operation. With CLOCK_MGMT_ON_ACT this can run from ISR context; for
+ * sources with long ramp-up prefer CLOCK_MGMT_ON_PM together with
+ * PM_DEVICE_RUNTIME so the request is issued from thread context.
+ */
 static void uarte_clk_request(const struct device *dev)
 {
 	__maybe_unused const struct uarte_nrfx_config *config = dev->config;
 
-#ifdef UARTE_ANY_CLK_QUALITY
-	if (config->clk_acc != NRF_DT_CLK_DEFAULT) {
-		struct nrf_clock_spec spec;
-#ifdef UARTE_ANY_CLK_FREQ
-		if (config->clk_frq) {
-			spec.frequency = config->clk_frq;
-		} else
-#endif
-		{
-			spec.frequency = 0;
-		}
-		spec.accuracy = config->clk_acc;
-
-		/* todo: how to handle calling from ISR context?
-		 * 1. like for UARTE120, suggest PM_DEVICE_RUNTIME, UART_NRFX_UARTE_CLOCK_MGMT_ON_PM
-		 *    and pm_device_runtime_get in application context.
-		 * 2. rework driver logic to continue UARTE-specific code execution only when callback
-		 *    from `nrf_clock_control_request` is invoked (i.e. driver is notified of started clock)
-		 */
-		int err = nrf_clock_control_request_sync(config->clk_dev, &spec, K_FOREVER);
+#ifdef UARTE_ANY_CLOCK_MGMT
+	if (config->clk_out != NULL) {
+		int err = clock_management_apply_state(config->clk_out,
+						       config->clk_state_active);
 		if (err < 0) {
-			/* todo: error handling */
+			LOG_ERR("failed to apply active clock state: %d", err);
 		}
 	}
 #endif
@@ -1772,22 +1763,12 @@ static void uarte_clk_release(const struct device *dev)
 {
 	__maybe_unused const struct uarte_nrfx_config *config = dev->config;
 
-#ifdef UARTE_ANY_CLK_QUALITY
-	if (config->clk_acc != NRF_DT_CLK_DEFAULT) {
-		struct nrf_clock_spec spec;
-#ifdef UARTE_ANY_CLK_FREQ
-		if (config->clk_frq) {
-			spec.frequency = config->clk_frq;
-		} else
-#endif
-		{
-			spec.frequency = 0;
-		}
-		spec.accuracy = config->clk_acc;
-
-		int err = nrf_clock_control_release(config->clk_dev, &spec);
+#ifdef UARTE_ANY_CLOCK_MGMT
+	if (config->clk_out != NULL) {
+		int err = clock_management_apply_state(config->clk_out,
+						       config->clk_state_sleep);
 		if (err < 0) {
-			/* todo: error handling */
+			LOG_ERR("failed to apply sleep clock state: %d", err);
 		}
 	}
 #endif
@@ -3394,12 +3375,30 @@ _uarte_instance_deinit_err:
 		    (_CFG_DATA_BITS(UARTE_PROP(idx, data_bits))),			\
 		    (UART_CFG_DATA_BITS_8))
 
+/*
+ * Initialize the clock-management consumer fields. Instances that define a
+ * "clock-outputs" property tap the named output ("default") and select between
+ * the "default" (active) and "sleep" clock states; other instances leave the
+ * output NULL and the clock-management calls become no-ops.
+ */
 #define UARTE_CLK_INIT(node_id)						       \
-	IF_ENABLED(UARTE_ANY_CLK_QUALITY,				       \
-		   (.clk_dev = CLK_DEV(node_id),			       \
-		    .clk_acc = CLK_ACC(node_id),))			       \
-	IF_ENABLED(UARTE_ANY_CLK_FREQ,					       \
-		   (.clk_frq = CLK_REQ_FRQ(node_id),))
+	IF_ENABLED(UARTE_ANY_CLOCK_MGMT,				       \
+		(COND_CODE_1(DT_NODE_HAS_PROP(node_id, clock_state_names),     \
+		   (.clk_out =						       \
+			CLOCK_MANAGEMENT_DT_GET_OUTPUT_BY_NAME(node_id, default),  \
+		    .clk_state_active =					       \
+			CLOCK_MANAGEMENT_DT_GET_STATE(node_id, default, default),  \
+		    .clk_state_sleep =					       \
+			CLOCK_MANAGEMENT_DT_GET_STATE(node_id, default, sleep),),  \
+		   (.clk_out = NULL,))))
+
+/* Define the clock output object for an instance (only emits code when
+ * CONFIG_CLOCK_MANAGEMENT_RUNTIME is enabled).
+ */
+#define UARTE_CLK_DEFINE(node_id)					       \
+	IF_ENABLED(UARTE_ANY_CLOCK_MGMT,				       \
+		(IF_ENABLED(DT_NODE_HAS_PROP(node_id, clock_state_names),      \
+		   (CLOCK_MANAGEMENT_DT_DEFINE_OUTPUT_BY_NAME(node_id, default);))))
 
 /* Get frequency divider that is used to adjust the BAUDRATE value. */
 #define UARTE_GET_BAUDRATE_DIV(f_pclk) (f_pclk / NRF_UARTE_BASE_FREQUENCY_16MHZ)
@@ -3415,7 +3414,7 @@ _uarte_instance_deinit_err:
 
 /* Convert DT current-speed to a value that is written to the BAUDRATE register. */
 #define UARTE_GET_BAUDRATE(idx) \
-	UARTE_GET_BAUDRATE2(CLK_SRC_FRQ(UARTE(idx)), UARTE_PROP(idx, current_speed))
+	UARTE_GET_BAUDRATE2(NRF_PERIPH_GET_FREQUENCY(UARTE(idx)), UARTE_PROP(idx, current_speed))
 
 /* Macro for setting nRF specific configuration structures. */
 #define UARTE_NRF_CONFIG(idx) {							\
@@ -3518,12 +3517,13 @@ _uarte_instance_deinit_err:
 		IF_ENABLED(CONFIG_UART_##idx##_INTERRUPT_DRIVEN,	       \
 			    (.int_driven = &uarte##idx##_int_driven,))	       \
 	};								       \
+	UARTE_CLK_DEFINE(UARTE(idx))					       \
 	COND_CODE_1(CONFIG_UART_USE_RUNTIME_CONFIGURE, (),		       \
 		(BUILD_ASSERT(UARTE_GET_BAUDRATE(idx) > 0,		       \
 			      "Unsupported baudrate");))		       \
 	static MAYBE_CONST struct uarte_nrfx_config uarte_##idx##z_config = {  \
 		COND_CODE_1(CONFIG_UART_USE_RUNTIME_CONFIGURE,		       \
-			(.clock_freq = CLK_SRC_FRQ(UARTE(idx)),),	       \
+			(.clock_freq = NRF_PERIPH_GET_FREQUENCY(UARTE(idx)),), \
 		    (IF_ENABLED(UARTE_HAS_FRAME_TIMEOUT,		       \
 			(.baudrate = UARTE_PROP(idx, current_speed),))	       \
 		     .nrf_baudrate = UARTE_GET_BAUDRATE(idx),		       \

@@ -1,0 +1,32 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  A statically defined clock configuration that a consumer can select, similar
+  to a pinctrl state. It fully describes the clock(s) that must be configured to
+  realize a given frequency at the associated clock-output, together with a rank
+  used to arbitrate between candidate states at runtime (lower is preferred).
+
+compatible: "clock-state"
+
+properties:
+  clocks:
+    type: phandle-array
+    required: true
+    description: |
+      Reference(s) to the clock producer(s) that must be configured/enabled to
+      realize this state. The referenced node is a clock producer device that
+      the consumer will start/stop through the abstracted interface.
+
+  clock-frequency:
+    type: int
+    required: true
+    description: Frequency (Hz) produced at the consumer when this state is applied.
+
+  rank:
+    type: int
+    default: 0
+    description: |
+      Rank used to arbitrate between multiple candidate states at runtime.
+      Lower is preferred (0 = best). A requested maximum rank is "sticky": no
+      state exceeding it may be applied.

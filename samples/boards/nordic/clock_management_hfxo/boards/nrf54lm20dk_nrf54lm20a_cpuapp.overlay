@@ -1,0 +1,50 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * The `xo` node is the concrete HFXO controller device (nordic,nrf-clock-xo,
+ * driven by clock_control_nrfx_xo.c). Give it #clock-cells so it can be the
+ * target of a `clocks` phandle-array in the clock-state nodes below and be
+ * resolved to a struct device at build time.
+ */
+&xo {
+	#clock-cells = <0>;
+};
+
+/*
+ * HFXO clock producer. Add the output "signal" it produces, then define the
+ * selectable clock-state configurations as children of that output, just like
+ * pinctrl states are defined under a pinctrl node.
+ */
+&hfxo {
+	hfxo_out: clock-output {
+		compatible = "clock-output";
+		#clock-cells = <0>;
+
+		clkstate_active: clock-state-active {
+			compatible = "clock-state";
+			clocks = <&xo>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <0>;
+		};
+
+		clkstate_sleep: clock-state-sleep {
+			compatible = "clock-state";
+			clocks = <&xo>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <10>;
+		};
+	};
+};
+
+/ {
+	clockdemo: clock-consumer-demo {
+		compatible = "zephyr,clock-consumer-demo";
+		clock-state-0 = <&clkstate_active>;
+		clock-state-1 = <&clkstate_sleep>;
+		clock-state-names = "active", "sleep";
+	};
+};

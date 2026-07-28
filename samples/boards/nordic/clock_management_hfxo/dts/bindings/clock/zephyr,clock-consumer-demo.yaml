@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Demonstration clock consumer. It binds to one or more clock-state nodes,
+  exactly like a pinctrl consumer binds to pinctrl states. The binding between
+  this consumer and its clock producer(s) is fully described in devicetree and
+  is fetched at build time by the application.
+
+compatible: "zephyr,clock-consumer-demo"
+
+properties:
+  clock-state-0:
+    type: phandle
+    description: Clock state referenced by index 0 (see clock-state-names).
+
+  clock-state-1:
+    type: phandle
+    description: Clock state referenced by index 1 (see clock-state-names).
+
+  clock-state-2:
+    type: phandle
+    description: Clock state referenced by index 2 (see clock-state-names).
+
+  clock-state-names:
+    type: string-array
+    description: Names for the clock-state-N entries, in matching order.

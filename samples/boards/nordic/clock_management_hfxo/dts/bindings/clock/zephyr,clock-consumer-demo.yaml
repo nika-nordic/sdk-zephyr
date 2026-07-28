@@ -10,6 +10,17 @@ description: |
 compatible: "zephyr,clock-consumer-demo"
 
 properties:
+  clock-outputs:
+    type: phandles
+    description: |
+      The clock-output signal(s) this consumer is wired to in the clock tree.
+      This describes the topology (which producer feeds the peripheral); the
+      concrete configuration to apply is carried by the clock-state-N entries.
+
+  clock-output-names:
+    type: string-array
+    description: Names for the clock-outputs entries, in matching order.
+
   clock-state-0:
     type: phandle
     description: Clock state referenced by index 0 (see clock-state-names).
@@ -21,6 +32,10 @@ properties:
   clock-state-2:
     type: phandle
     description: Clock state referenced by index 2 (see clock-state-names).
+
+  clock-state-3:
+    type: phandle
+    description: Clock state referenced by index 3 (see clock-state-names).
 
   clock-state-names:
     type: string-array

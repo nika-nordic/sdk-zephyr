@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  A clock multiplexer that selects its output from one of several input
+  sources. Used purely to describe the clock tree topology (which sources can
+  feed a given clock); the runtime selection is expressed through clock-state
+  nodes that request the corresponding source device.
+
+compatible: "clock-mux"
+
+include: [base.yaml, clock-controller.yaml]
+
+properties:
+  "#clock-cells":
+    const: 1
+
+  input-sources:
+    type: phandles
+    required: true
+    description: |
+      The candidate input clocks, in mux-index order. A clock-state specifier
+      cell selects the zero-based index into this list.
+
+  clock-frequency:
+    type: int
+    description: Nominal output frequency (Hz) of the selected source.
+
+clock-cells:
+  - source

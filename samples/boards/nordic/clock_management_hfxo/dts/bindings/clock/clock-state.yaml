@@ -12,11 +12,13 @@ compatible: "clock-state"
 properties:
   clocks:
     type: phandle-array
-    required: true
     description: |
       Reference(s) to the clock producer(s) that must be configured/enabled to
       realize this state. The referenced node is a clock producer device that
-      the consumer will start/stop through the abstracted interface.
+      the consumer will request/release through the abstracted interface.
+
+      When omitted, the state needs no runtime action - it models a default
+      configuration served by an always-on internal source (e.g. HFINT/LFRC).
 
   clock-frequency:
     type: int

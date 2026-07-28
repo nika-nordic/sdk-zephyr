@@ -1,9 +1,10 @@
 sample:
-  name: Clock-state HFXO concept demo
+  name: Clock-state concept demo (nRF54LM20B)
   description: >
-    Demonstrates a devicetree-based binding between a clock consumer and a clock
-    producer (HFXO) using clock-state nodes with a rank, fetched at build time
-    and applied at runtime by starting/stopping HFXO.
+    Models the nRF54LM20B clock tree as devicetree producers, binds peripherals
+    (consumers) to them with clock-state nodes carrying a rank, and drives the
+    producers at runtime through the reference-counted nrf_clock_control
+    request/release API so multiple consumers can share a clock.
 tests:
   sample.boards.nordic.clock_management_hfxo:
     platform_allow:
@@ -18,5 +19,6 @@ tests:
       type: multi_line
       ordered: true
       regex:
-        - "Clock-state HFXO concept demo"
-        - "selected 'active'"
+        - "Clock-state concept demo"
+        - "Rank arbitration"
+        - "Shared HFXO via request/release"

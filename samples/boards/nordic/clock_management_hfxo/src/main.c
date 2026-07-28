@@ -14,18 +14,40 @@
 
 LOG_MODULE_REGISTER(clock_state_demo, LOG_LEVEL_INF);
 
-/* The clock consumer whose producer binding is described in devicetree. */
-#define CLOCK_CONSUMER_NODE DT_NODELABEL(clockdemo)
+/* Consumer nodes described in the board overlay (nRF54LM20B clock tree). */
+#define UARTE_NODE DT_NODELABEL(uarte_consumer)
+#define RADIO_NODE DT_NODELABEL(radio_consumer)
+#define PDM_NODE   DT_NODELABEL(pdm_consumer)
+#define USBHS_NODE DT_NODELABEL(usbhs_consumer)
+#define GRTC_NODE  DT_NODELABEL(grtc_consumer)
 
-BUILD_ASSERT(DT_NODE_EXISTS(CLOCK_CONSUMER_NODE),
-	     "clockdemo consumer node is missing (check the board overlay)");
+/* The HFXO producer device, used to observe the shared clock state. */
+static const struct device *const hfxo_dev = DEVICE_DT_GET(DT_NODELABEL(xo));
 
 /*
- * The entire consumer -> producer binding is fetched from devicetree at build
- * time here. Each entry knows which producer device to drive, at what rank, and
- * for what frequency, without any of that being hard-coded in the logic below.
+ * The consumer -> producer bindings are fetched from devicetree at build time.
+ * Each table entry knows which producer to request, at what rank and frequency,
+ * with none of that hard-coded in the logic below.
  */
-static const struct clock_state clock_states[] = CLOCK_STATE_DEMO_STATES(CLOCK_CONSUMER_NODE);
+static const struct clock_state uarte_states[] = CLOCK_STATE_DEMO_STATES(UARTE_NODE);
+static const struct clock_state radio_states[] = CLOCK_STATE_DEMO_STATES(RADIO_NODE);
+static const struct clock_state pdm_states[] = CLOCK_STATE_DEMO_STATES(PDM_NODE);
+static const struct clock_state usbhs_states[] = CLOCK_STATE_DEMO_STATES(USBHS_NODE);
+static const struct clock_state grtc_states[] = CLOCK_STATE_DEMO_STATES(GRTC_NODE);
+
+struct consumer {
+	const char *name;
+	const struct clock_state *states;
+	size_t count;
+};
+
+static const struct consumer consumers[] = {
+	{"uarte", uarte_states, ARRAY_SIZE(uarte_states)},
+	{"radio", radio_states, ARRAY_SIZE(radio_states)},
+	{"pdm", pdm_states, ARRAY_SIZE(pdm_states)},
+	{"usbhs", usbhs_states, ARRAY_SIZE(usbhs_states)},
+	{"grtc", grtc_states, ARRAY_SIZE(grtc_states)},
+};
 
 static const char *status_str(enum clock_control_status status)
 {
@@ -36,95 +58,104 @@ static const char *status_str(enum clock_control_status status)
 		return "off";
 	case CLOCK_CONTROL_STATUS_ON:
 		return "on";
-	case CLOCK_CONTROL_STATUS_UNKNOWN:
 	default:
 		return "unknown";
 	}
 }
 
-static void report_producer(const struct clock_state *state)
+static const char *producer_name(const struct clock_state *state)
 {
-	enum clock_control_status status = clock_control_get_status(state->producer, NULL);
-
-	LOG_INF("  producer '%s' is now %s", state->producer->name, status_str(status));
+	return (state->producer != NULL) ? state->producer->name : "(none/internal)";
 }
 
-static void dump_states(void)
+static void hfxo_report(const char *ctx)
 {
-	LOG_INF("Consumer '%s' is bound to %zu clock state(s):",
-		DT_NODE_FULL_NAME(CLOCK_CONSUMER_NODE), ARRAY_SIZE(clock_states));
+	LOG_INF("    HFXO is %s  (%s)", status_str(clock_control_get_status(hfxo_dev, NULL)), ctx);
+}
 
-	for (size_t i = 0; i < ARRAY_SIZE(clock_states); i++) {
-		const struct clock_state *state = &clock_states[i];
+static void dump_tree(void)
+{
+	LOG_INF("nRF54LM20B clock tree - consumer bindings from devicetree:");
 
-		LOG_INF("  [%zu] name=%-6s producer=%-8s rank=%u frequency=%u Hz", i, state->name,
-			state->producer->name, state->rank, state->frequency);
+	for (size_t c = 0; c < ARRAY_SIZE(consumers); c++) {
+		const struct consumer *cons = &consumers[c];
+
+		LOG_INF("  %s: %zu state(s)", cons->name, cons->count);
+		for (size_t i = 0; i < cons->count; i++) {
+			const struct clock_state *s = &cons->states[i];
+
+			LOG_INF("    - %-14s producer=%-16s rank=%2u  %u Hz", s->name,
+				producer_name(s), s->rank, s->frequency);
+		}
 	}
 }
 
-/* Pick the best eligible state, apply it, and confirm the hardware effect. */
-static void run_state_by_rank(uint32_t max_rank)
+/* Demonstrate rank arbitration between the candidate states of one consumer. */
+static void demo_rank_arbitration(void)
 {
-	const struct clock_state *state;
-	int err;
+	const struct consumer *pdm = &consumers[2];
+	const struct clock_state *chosen;
 
-	LOG_INF("Requesting best state with rank <= %u ...", max_rank);
+	LOG_INF("== Rank arbitration (consumer '%s') ==", pdm->name);
 
-	state = clock_state_select_by_rank(clock_states, ARRAY_SIZE(clock_states), max_rank);
-	if (state == NULL) {
-		LOG_WRN("  no eligible clock state for this constraint");
-		return;
+	chosen = clock_state_select_by_rank(pdm->states, pdm->count, CLOCK_STATE_DEMO_MAX_RANK);
+	LOG_INF("  best of %zu candidates -> '%s' (rank %u) via %s", pdm->count, chosen->name,
+		chosen->rank, producer_name(chosen));
+
+	if (clock_state_apply(chosen) == 0) {
+		LOG_INF("  applied '%s'", chosen->name);
 	}
+	k_sleep(K_MSEC(500));
+	(void)clock_state_release(chosen);
+}
 
-	LOG_INF("  selected '%s' (rank %u, %u Hz)", state->name, state->rank, state->frequency);
+/*
+ * Demonstrate reference-counted sharing: two consumers both need HFXO. It stays
+ * on until the last one releases it - impossible to model with plain on/off.
+ */
+static void demo_shared_hfxo(void)
+{
+	const struct clock_state *uarte_xtal =
+		clock_state_find(uarte_states, ARRAY_SIZE(uarte_states), "xtal");
+	const struct clock_state *radio_xtal =
+		clock_state_find(radio_states, ARRAY_SIZE(radio_states), "xtal");
 
-	err = clock_state_apply(state);
-	if (err < 0) {
-		LOG_ERR("  failed to apply state '%s' (%d)", state->name, err);
-		return;
-	}
+	LOG_INF("== Shared HFXO via request/release ==");
+	hfxo_report("initial");
 
-	report_producer(state);
+	LOG_INF("  uarte requests HFXO ...");
+	(void)clock_state_apply(uarte_xtal);
+	hfxo_report("after uarte request");
+
+	LOG_INF("  radio requests HFXO ...");
+	(void)clock_state_apply(radio_xtal);
+	hfxo_report("after radio request");
+
+	LOG_INF("  uarte releases HFXO (radio still holds it) ...");
+	(void)clock_state_release(uarte_xtal);
+	hfxo_report("after uarte release");
+
+	LOG_INF("  radio releases HFXO (last consumer) ...");
+	(void)clock_state_release(radio_xtal);
+	hfxo_report("after radio release");
 }
 
 int main(void)
 {
-	LOG_INF("Clock-state HFXO concept demo");
+	LOG_INF("Clock-state concept demo (nRF54LM20B, request/release)");
 
-	for (size_t i = 0; i < ARRAY_SIZE(clock_states); i++) {
-		if (!device_is_ready(clock_states[i].producer)) {
-			LOG_ERR("producer '%s' not ready", clock_states[i].producer->name);
-			return 0;
-		}
+	if (!device_is_ready(hfxo_dev)) {
+		LOG_ERR("HFXO device not ready");
+		return 0;
 	}
 
-	dump_states();
+	dump_tree();
 
 	while (1) {
-		/*
-		 * Unconstrained request: the lowest-rank ("active", high-accuracy
-		 * HFXO) state wins and HFXO is started.
-		 */
-		run_state_by_rank(CLOCK_STATE_DEMO_MAX_RANK);
-		k_sleep(K_SECONDS(2));
-
-		/*
-		 * Switch to the "sleep" state to release the producer, i.e. stop
-		 * HFXO. This mirrors a consumer that no longer needs the clock.
-		 */
-		LOG_INF("Switching to 'sleep' state, releasing HFXO ...");
-		{
-			const struct clock_state *sleep_state =
-				&clock_states[ARRAY_SIZE(clock_states) - 1];
-			int err = clock_state_release(sleep_state);
-
-			if (err < 0) {
-				LOG_ERR("  failed to release '%s' (%d)", sleep_state->name, err);
-			} else {
-				report_producer(sleep_state);
-			}
-		}
-		k_sleep(K_SECONDS(2));
+		demo_rank_arbitration();
+		k_sleep(K_SECONDS(1));
+		demo_shared_hfxo();
+		k_sleep(K_SECONDS(3));
 	}
 
 	return 0;

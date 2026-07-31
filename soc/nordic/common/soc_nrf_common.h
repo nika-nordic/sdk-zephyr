@@ -278,25 +278,51 @@
 			     (DT_PROP_LAST(DT_CLOCKS_CTLR(node), supported_clock_frequency)))),	\
 		(NRFX_MHZ_TO_HZ(16)))
 
+/*
+ * Simplified ("on/off") clock management scheme.
+ *
+ * In this scheme the `clocks` property of a peripheral (clock consumer) node
+ * references a clock producer device *directly* (e.g. `&hfclk`), instead of an
+ * intermediate clock-signal node paired with a quality enumerator.
+ *
+ * The mere presence of the `clocks` property is the whole mechanism: the driver
+ * shall request (start) the referenced producer. Its absence means no runtime
+ * action is taken and the default clock (e.g. HFINT) is used, preserving legacy
+ * behavior with no regression.
+ *
+ * The desired clock/mode is selected by *which* producer node is referenced.
+ * Optional cells only refine the request when needed:
+ *
+ *   clocks = <&producer>                 -> request producer, default spec
+ *   clocks = <&producer SPEC>            -> request producer with a clock specifier
+ *   clocks = <&producer SPEC FREQUENCY>  -> request producer with specifier and frequency
+ */
+
+/* Whether the client references a clock producer to request. */
 #define CLK_PRESENT(client) DT_NODE_HAS_PROP(client, clocks)
 
-#define CLK_SIG(client) DT_PHANDLE(client, clocks)
+/* Clock producer device referenced directly by the client. */
+#define CLK_DEV(client) DEVICE_DT_GET(DT_CLOCKS_CTLR(client))
 
+/* Optional clock specifier (2nd cell); NRF_DT_CLK_DEFAULT when not present. */
+#define CLK_SPEC(client) DT_PHA_BY_IDX_OR(client, clocks, 0, quality, NRF_DT_CLK_DEFAULT)
+
+/* Optional frequency to request (3rd cell); 0 when not present. */
+#define CLK_REQ_FRQ(client) DT_PHA_BY_IDX_OR(client, clocks, 0, frequency, 0)
+
+/*
+ * Base/source frequency for the client (e.g. for baudrate calculation).
+ * Preference:
+ *   1. explicit `clock-frequency` at the client node,
+ *   2. `clock-frequency` of the referenced clock producer,
+ *   3. default 16 MHz (standard base frequency).
+ */
 #define CLK_SRC_FRQ(client) \
-	COND_CODE_1(DT_NODE_HAS_COMPAT(CLK_SIG(client), nordic_variable_clock), \
-		    (DT_PHA_BY_IDX(client, clocks, 0, frequency)), /* explicit freq defined at client */ \
-		    (DT_PROP(CLK_SIG(client), clock_frequency))) /* static freq from clock signal */
-
-#define CLK_REQ_FRQ(client) \
-	COND_CODE_1(DT_PHA_HAS_CELL_AT_IDX(client, clocks, 0, frequency), \
-		    (DT_PHA_BY_IDX(client, clocks, 0, frequency)), \
-		    (0))
-
-#define CLK_ACC(client) DT_PHA_BY_IDX(client, clocks, 0, quality)
-
-#define CLK_DEV(client) COND_CODE_1(DT_NODE_HAS_COMPAT(CLK_SIG(client), nordic_clock_signal), \
-				    (DEVICE_DT_GET(CLK_SIG(CLK_SIG(client)))), /* assume parent is actual device we look for */ \
-				    (DEVICE_DT_GET(CLK_SIG(client))))
+	COND_CODE_1(DT_NODE_HAS_PROP(client, clock_frequency), \
+		(DT_PROP(client, clock_frequency)), \
+		(COND_CODE_1(CLK_PRESENT(client), \
+			(DT_PROP_OR(DT_CLOCKS_CTLR(client), clock_frequency, NRFX_MHZ_TO_HZ(16))), \
+			(NRFX_MHZ_TO_HZ(16)))))
 
 
 /**

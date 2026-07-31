@@ -1,6 +1,13 @@
+/*
+ * Simplified ("on/off") clock management showcase.
+ *
+ * The UARTE references the clock producer (hfclk) directly. The presence of the
+ * `clocks` property makes the UARTE driver request (start) HFXO. Removing the
+ * property would keep the default HFINT clock (no runtime action, no regression).
+ */
 &uart1 {
     status = "okay";
-    clocks = <&pclk16m NRF_DT_CLK_XTAL>;
+    clocks = <&hfclk>;
     current-speed = <9600>;
 };
 

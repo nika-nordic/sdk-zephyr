@@ -50,13 +50,13 @@ LOG_MODULE_REGISTER(uart_nrfx_uarte, CONFIG_UART_LOG_LEVEL);
 #define UARTE_FOR_EACH_ENABLED_INSTANCE(f, sep, ...) \
 	DT_FOREACH_STATUS_OKAY_VARGS(nordic_nrf_uarte, f, __VA_ARGS__)
 
-/* Determine if any instance is using non-default clock source quality specifier. */
-#define IS_CLK_QUALITY(unused, prefix, i, _) \
+/* Determine if any enabled instance references a clock producer to request. */
+#define IS_CLK_REQUEST(unused, prefix, i, _) \
 	(COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(UARTE(i)), \
-		     (CLK_ACC(UARTE(i)) != NRF_DT_CLK_DEFAULT), (0)))
+		     (CLK_PRESENT(UARTE(i))), (0)))
 
-#if UARTE_FOR_EACH_INSTANCE(IS_CLK_QUALITY, (||), (0))
-	#define UARTE_ANY_CLK_QUALITY 1
+#if UARTE_FOR_EACH_INSTANCE(IS_CLK_REQUEST, (||), (0))
+	#define UARTE_ANY_CLK 1
 #endif
 
 /* Determine if any instance is using clock source frequency specifier. */
@@ -420,9 +420,9 @@ struct uarte_nrfx_config {
 #endif /* UARTE_ANY_ASYNC */
 	uint8_t *poll_out_byte;
 	uint8_t *poll_in_byte;
-#ifdef UARTE_ANY_CLK_QUALITY
-	const struct device * clk_dev;
-	int16_t clk_acc;
+#ifdef UARTE_ANY_CLK
+	/* Clock producer to request, or NULL when this instance keeps the default clock. */
+	const struct device *clk_dev;
 #ifdef UARTE_ANY_CLK_FREQ
 	uint32_t clk_frq;
 #endif
@@ -1741,19 +1741,21 @@ static void uarte_clk_request(const struct device *dev)
 {
 	__maybe_unused const struct uarte_nrfx_config *config = dev->config;
 
-#ifdef UARTE_ANY_CLK_QUALITY
-	if (config->clk_acc != NRF_DT_CLK_DEFAULT) {
-		struct nrf_clock_spec spec;
+#ifdef UARTE_ANY_CLK
+	/* Simplified scheme: the presence of a clock producer reference is the whole
+	 * mechanism. Just request (start) the referenced producer - its identity
+	 * already encodes the desired clock source. Instances without a `clocks`
+	 * property have clk_dev == NULL and keep the default clock (no action).
+	 */
+	if (config->clk_dev != NULL) {
+		struct nrf_clock_spec spec = {
+			.frequency = 0,
+			.accuracy = 0,
+			.precision = 0,
+		};
 #ifdef UARTE_ANY_CLK_FREQ
-		if (config->clk_frq) {
-			spec.frequency = config->clk_frq;
-		} else
+		spec.frequency = config->clk_frq;
 #endif
-		{
-			spec.frequency = 0;
-		}
-		spec.accuracy = config->clk_acc;
-
 		/* todo: how to handle calling from ISR context?
 		 * 1. like for UARTE120, suggest PM_DEVICE_RUNTIME, UART_NRFX_UARTE_CLOCK_MGMT_ON_PM
 		 *    and pm_device_runtime_get in application context.
@@ -1772,19 +1774,16 @@ static void uarte_clk_release(const struct device *dev)
 {
 	__maybe_unused const struct uarte_nrfx_config *config = dev->config;
 
-#ifdef UARTE_ANY_CLK_QUALITY
-	if (config->clk_acc != NRF_DT_CLK_DEFAULT) {
-		struct nrf_clock_spec spec;
+#ifdef UARTE_ANY_CLK
+	if (config->clk_dev != NULL) {
+		struct nrf_clock_spec spec = {
+			.frequency = 0,
+			.accuracy = 0,
+			.precision = 0,
+		};
 #ifdef UARTE_ANY_CLK_FREQ
-		if (config->clk_frq) {
-			spec.frequency = config->clk_frq;
-		} else
+		spec.frequency = config->clk_frq;
 #endif
-		{
-			spec.frequency = 0;
-		}
-		spec.accuracy = config->clk_acc;
-
 		int err = nrf_clock_control_release(config->clk_dev, &spec);
 		if (err < 0) {
 			/* todo: error handling */
@@ -3395,9 +3394,9 @@ _uarte_instance_deinit_err:
 		    (UART_CFG_DATA_BITS_8))
 
 #define UARTE_CLK_INIT(node_id)						       \
-	IF_ENABLED(UARTE_ANY_CLK_QUALITY,				       \
-		   (.clk_dev = CLK_DEV(node_id),			       \
-		    .clk_acc = CLK_ACC(node_id),))			       \
+	IF_ENABLED(UARTE_ANY_CLK,					       \
+		   (.clk_dev = COND_CODE_1(CLK_PRESENT(node_id),	       \
+					   (CLK_DEV(node_id)), (NULL)),))      \
 	IF_ENABLED(UARTE_ANY_CLK_FREQ,					       \
 		   (.clk_frq = CLK_REQ_FRQ(node_id),))
 

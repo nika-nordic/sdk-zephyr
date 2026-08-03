@@ -3,24 +3,12 @@
 
 description: |
   Demonstration clock consumer. It binds to one or more clock-state nodes,
-  exactly like a pinctrl consumer binds to pinctrl states. The binding between
-  this consumer and its clock producer(s) is fully described in devicetree and
-  is fetched at build time by the application.
+  exactly like a pinctrl consumer binds to pinctrl states. The binding is fully
+  described in devicetree and fetched at build time by the application.
 
 compatible: "zephyr,clock-consumer-demo"
 
 properties:
-  clock-outputs:
-    type: phandles
-    description: |
-      The clock-output signal(s) this consumer is wired to in the clock tree.
-      This describes the topology (which producer feeds the peripheral); the
-      concrete configuration to apply is carried by the clock-state-N entries.
-
-  clock-output-names:
-    type: string-array
-    description: Names for the clock-outputs entries, in matching order.
-
   clock-state-0:
     type: phandle
     description: Clock state referenced by index 0 (see clock-state-names).

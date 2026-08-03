@@ -7,154 +7,83 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/clock_control.h>
 #include <zephyr/logging/log.h>
 
-#include "clock_state_demo.h"
+#include "clock_mgmt.h"
 
-LOG_MODULE_REGISTER(clock_state_demo, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-/* Consumer nodes described in the board overlay (nRF54LM20B clock tree). */
-#define UARTE_NODE DT_NODELABEL(uarte_consumer)
-#define RADIO_NODE DT_NODELABEL(radio_consumer)
-#define PDM_NODE   DT_NODELABEL(pdm_consumer)
-#define USBHS_NODE DT_NODELABEL(usbhs_consumer)
-#define GRTC_NODE  DT_NODELABEL(grtc_consumer)
+/* Consumers described in the board overlay (nRF54LM20B clock tree). */
+CLK_CONSUMER_DEFINE(uarte, DT_NODELABEL(uarte_consumer));
+CLK_CONSUMER_DEFINE(radio, DT_NODELABEL(radio_consumer));
+CLK_CONSUMER_DEFINE(pdm, DT_NODELABEL(pdm_consumer));
+CLK_CONSUMER_DEFINE(usbhs, DT_NODELABEL(usbhs_consumer));
+CLK_CONSUMER_DEFINE(grtc, DT_NODELABEL(grtc_consumer));
 
-/* The HFXO producer device, used to observe the shared clock state. */
-static const struct device *const hfxo_dev = DEVICE_DT_GET(DT_NODELABEL(xo));
-
-/*
- * The consumer -> producer bindings are fetched from devicetree at build time.
- * Each table entry knows which producer to request, at what rank and frequency,
- * with none of that hard-coded in the logic below.
- */
-static const struct clock_state uarte_states[] = CLOCK_STATE_DEMO_STATES(UARTE_NODE);
-static const struct clock_state radio_states[] = CLOCK_STATE_DEMO_STATES(RADIO_NODE);
-static const struct clock_state pdm_states[] = CLOCK_STATE_DEMO_STATES(PDM_NODE);
-static const struct clock_state usbhs_states[] = CLOCK_STATE_DEMO_STATES(USBHS_NODE);
-static const struct clock_state grtc_states[] = CLOCK_STATE_DEMO_STATES(GRTC_NODE);
-
-struct consumer {
-	const char *name;
-	const struct clock_state *states;
-	size_t count;
-};
-
-static const struct consumer consumers[] = {
-	{"uarte", uarte_states, ARRAY_SIZE(uarte_states)},
-	{"radio", radio_states, ARRAY_SIZE(radio_states)},
-	{"pdm", pdm_states, ARRAY_SIZE(pdm_states)},
-	{"usbhs", usbhs_states, ARRAY_SIZE(usbhs_states)},
-	{"grtc", grtc_states, ARRAY_SIZE(grtc_states)},
-};
-
-static const char *status_str(enum clock_control_status status)
+static void step(const char *what)
 {
-	switch (status) {
-	case CLOCK_CONTROL_STATUS_STARTING:
-		return "starting";
-	case CLOCK_CONTROL_STATUS_OFF:
-		return "off";
-	case CLOCK_CONTROL_STATUS_ON:
-		return "on";
-	default:
-		return "unknown";
-	}
-}
-
-static const char *producer_name(const struct clock_state *state)
-{
-	return (state->producer != NULL) ? state->producer->name : "(none/internal)";
-}
-
-static void hfxo_report(const char *ctx)
-{
-	LOG_INF("    HFXO is %s  (%s)", status_str(clock_control_get_status(hfxo_dev, NULL)), ctx);
-}
-
-static void dump_tree(void)
-{
-	LOG_INF("nRF54LM20B clock tree - consumer bindings from devicetree:");
-
-	for (size_t c = 0; c < ARRAY_SIZE(consumers); c++) {
-		const struct consumer *cons = &consumers[c];
-
-		LOG_INF("  %s: %zu state(s)", cons->name, cons->count);
-		for (size_t i = 0; i < cons->count; i++) {
-			const struct clock_state *s = &cons->states[i];
-
-			LOG_INF("    - %-14s producer=%-16s rank=%2u  %u Hz", s->name,
-				producer_name(s), s->rank, s->frequency);
-		}
-	}
-}
-
-/* Demonstrate rank arbitration between the candidate states of one consumer. */
-static void demo_rank_arbitration(void)
-{
-	const struct consumer *pdm = &consumers[2];
-	const struct clock_state *chosen;
-
-	LOG_INF("== Rank arbitration (consumer '%s') ==", pdm->name);
-
-	chosen = clock_state_select_by_rank(pdm->states, pdm->count, CLOCK_STATE_DEMO_MAX_RANK);
-	LOG_INF("  best of %zu candidates -> '%s' (rank %u) via %s", pdm->count, chosen->name,
-		chosen->rank, producer_name(chosen));
-
-	if (clock_state_apply(chosen) == 0) {
-		LOG_INF("  applied '%s'", chosen->name);
-	}
-	k_sleep(K_MSEC(500));
-	(void)clock_state_release(chosen);
-}
-
-/*
- * Demonstrate reference-counted sharing: two consumers both need HFXO. It stays
- * on until the last one releases it - impossible to model with plain on/off.
- */
-static void demo_shared_hfxo(void)
-{
-	const struct clock_state *uarte_xtal =
-		clock_state_find(uarte_states, ARRAY_SIZE(uarte_states), "xtal");
-	const struct clock_state *radio_xtal =
-		clock_state_find(radio_states, ARRAY_SIZE(radio_states), "xtal");
-
-	LOG_INF("== Shared HFXO via request/release ==");
-	hfxo_report("initial");
-
-	LOG_INF("  uarte requests HFXO ...");
-	(void)clock_state_apply(uarte_xtal);
-	hfxo_report("after uarte request");
-
-	LOG_INF("  radio requests HFXO ...");
-	(void)clock_state_apply(radio_xtal);
-	hfxo_report("after radio request");
-
-	LOG_INF("  uarte releases HFXO (radio still holds it) ...");
-	(void)clock_state_release(uarte_xtal);
-	hfxo_report("after uarte release");
-
-	LOG_INF("  radio releases HFXO (last consumer) ...");
-	(void)clock_state_release(radio_xtal);
-	hfxo_report("after radio release");
+	LOG_INF("%s", what);
+	k_sleep(K_MSEC(800));
 }
 
 int main(void)
 {
-	LOG_INF("Clock-state concept demo (nRF54LM20B, request/release)");
+	LOG_INF("Clock-state concept demo (nRF54LM20B, tree resolution + rank)");
 
-	if (!device_is_ready(hfxo_dev)) {
-		LOG_ERR("HFXO device not ready");
-		return 0;
-	}
-
-	dump_tree();
+	clkmgmt_register(&uarte);
+	clkmgmt_register(&radio);
+	clkmgmt_register(&pdm);
+	clkmgmt_register(&usbhs);
+	clkmgmt_register(&grtc);
 
 	while (1) {
-		demo_rank_arbitration();
-		k_sleep(K_SECONDS(1));
-		demo_shared_hfxo();
+		/*
+		 * 1. UARTE tolerates HFINT and nobody needs the crystal yet, so
+		 *    HFCLK resolves to HFINT and HFXO stays off.
+		 */
+		step("== 1. uarte applies 'hfint' (rank 10) ==");
+		clkmgmt_apply(&uarte, "hfint");
+		clkmgmt_report("uarte hfint");
+
+		/*
+		 * 2. RADIO needs the crystal (rank 0). Arbitration on the shared
+		 *    HFCLK node makes HFXO win - and UARTE, though it asked for
+		 *    HFINT, is upgraded to HFXO too.
+		 */
+		step("== 2. radio applies 'xtal' (rank 0) - shared HFCLK arbitration ==");
+		clkmgmt_apply(&radio, "xtal");
+		clkmgmt_report("uarte hfint + radio xtal");
+
+		step("== 3. radio releases - HFCLK falls back to HFINT ==");
+		clkmgmt_release(&radio);
+		clkmgmt_report("uarte hfint only");
+
+		/*
+		 * 4. USBHS needs XO24M, which requires HFXO. HFCLK opportunistically
+		 *    upgrades to HFXO, so UARTE rides the crystal again "for free".
+		 */
+		step("== 4. usbhs applies '24m' - XO24M forces HFXO, HFCLK upgrades ==");
+		clkmgmt_apply(&usbhs, "24m");
+		clkmgmt_report("uarte hfint + usbhs 24m");
+
+		/* 5. PDM arbitrates its own three candidate states -> best rank (24m). */
+		step("== 5. pdm applies best-ranked state (rank arbitration) ==");
+		clkmgmt_apply(&pdm, pdm.states[0].name);
+		clkmgmt_report("+ pdm 24m");
+
+		/* 6. GRTC brings up the LF domain independently. */
+		step("== 6. grtc applies 'lfxo' - independent LF domain ==");
+		clkmgmt_apply(&grtc, "lfxo");
+		clkmgmt_report("+ grtc lfxo");
+
+		/* 7. Tear everything down; HFXO/XO24M/LFCLK all drop. */
+		step("== 7. release all ==");
+		clkmgmt_release(&uarte);
+		clkmgmt_release(&usbhs);
+		clkmgmt_release(&pdm);
+		clkmgmt_release(&grtc);
+		clkmgmt_report("idle");
+
 		k_sleep(K_SECONDS(3));
 	}
 

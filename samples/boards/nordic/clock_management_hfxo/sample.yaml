@@ -20,5 +20,5 @@ tests:
       ordered: true
       regex:
         - "Clock-state concept demo"
-        - "Rank arbitration"
-        - "Shared HFXO via request/release"
+        - "shared HFCLK arbitration"
+        - "XO24M forces HFXO"

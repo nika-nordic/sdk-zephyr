@@ -1,9 +1,9 @@
 .. zephyr:code-sample:: clock_management_hfxo
    :name: Clock-state concept demo (nRF54LM20B)
 
-   Model the nRF54LM20B clock tree in devicetree, bind peripherals (consumers)
-   to clock producers with rank-arbitrated clock-state nodes, and drive them at
-   runtime through a reference-counted request/release interface.
+   Model the nRF54LM20B clock tree in devicetree, bind peripherals to it with
+   rank-arbitrated clock-state nodes, and resolve the whole tree in a
+   clock-management layer that arbitrates shared nodes and drives the producers.
 
 Overview
 ********
@@ -12,49 +12,52 @@ This sample demonstrates a unified, devicetree-based abstraction for associating
 *clock consumers* with *clock producers*, using the ``clock-state`` concept
 (from the upstream clock-management RFC).
 
-The whole nRF54LM20B clock tree is modeled in the sample's board overlay:
+The nRF54LM20B clock tree is modeled in the sample's board overlay:
 
 .. code-block:: none
 
-   Sources        Muxes / derived        Outputs (pclk*)      Consumers
-   -------        ---------------        ---------------      ---------
+   Sources        Muxes / gate            Outputs (pclk*)      Consumers
+   -------        ------------            ---------------      ---------
    HFINT ---+
             +--> HFCLK (mux) --+--> PCLK32M --> RADIO, PDM, TDM
    HFXTAL --+                  +--> PCLK16M --> UARTE
       |                        +--> PCLK1M
       |                        +--> HCLKCORE -> CPU
-      +--------> XO24M --------+--> PCLK24M --> USBHS, PDM
+      +--------> XO24M (gate)--+--> PCLK24M --> USBHS, PDM
    LFRC ----+
             +--> LFCLK (mux) --+--> PCLK32Ki -> GRTC
    LFXTAL --+   (SYNT from HFCLK)
 
-Each peripheral clock output exposes a ``clock-output`` signal. Selectable
-configurations are described as ``clock-state`` children of that output, each
-carrying a ``rank`` used to arbitrate between them at runtime (lower is
-preferred). Every consumer node binds to those states, exactly like a pinctrl
-consumer binds to pinctrl states.
+Each ``clock-state`` encodes a *selection in the tree* - a mux input or a gate
+setting, via ``clocks = <&node selector>`` - plus a ``rank``. Consumers bind to
+these states exactly like a pinctrl consumer binds to pinctrl states.
 
-The application:
+Key idea: arbitration lives in a layer above the producer drivers
+****************************************************************************
 
-#. Fetches the consumer -> producer bindings from devicetree **at build time**
-   into per-consumer tables of :c:struct:`clock_state`.
-#. Demonstrates **rank arbitration**: for the ``pdm`` consumer (three candidate
-   states) it selects the lowest-rank one.
-#. Demonstrates **reference-counted sharing**: the ``uarte`` and ``radio``
-   consumers both request HFXO via ``nrf_clock_control_request``; HFXO stays on
-   until the last consumer releases it. This is why request/release is used
-   instead of plain ``clock_control_on``/``off``.
+When a consumer applies a state, the sample-local clock-management layer
+(``src/clock_mgmt.c``) resolves the **whole path** from the selected node up to
+its source, and arbitrates shared nodes:
 
-The three producers that can be driven at runtime (HFXO, XO24M, LFCLK) map to
-the existing split ``clock_control`` devices ``&xo``, ``&xo24m`` and ``&lfclk``.
-The rest of the tree is descriptive. States with no ``clocks`` phandle model a
-default configuration served by an always-on internal source (HFINT/LFRC) and
-need no runtime action.
+* **Shared-node rank arbitration.** Several consumers select the same HFCLK mux.
+  The best-ranked request wins for *everyone* downstream. So when ``radio``
+  (rank 0, HFXO) runs alongside ``uarte`` (rank 10, HFINT), HFCLK resolves to
+  HFXO and ``uarte`` is upgraded to the crystal even though it asked for HFINT.
+
+* **Opportunistic HFXO upgrade.** ``XO24M`` (needed by ``usbhs``) is derived
+  from HFXTAL, so enabling it forces HFXO on. HFCLK then opportunistically
+  sources from HFXO - HFINT consumers ride the crystal "for free" while it is
+  already running.
+
+Only the three leaf producers that can be driven at runtime (HFXO, XO24M, LFCLK)
+are actually requested/released - through the reference-counted
+``nrf_clock_control`` API, mapped to ``&xo``, ``&xo24m`` and ``&lfclk``. The mux
+source selection is inferred (on LM20B, "HFCLK = HFXTAL" effectively means "HFXO
+is requested"), so the layer reports the resolved configuration of each node.
 
 Because the upstream clock-management framework is not yet available in this
-tree, the "abstracted interface" is a small sample-local helper
-(``src/clock_state_demo.h``), a stand-in for a future ``clock_management_*`` API.
-Everything is kept self-contained under this sample directory.
+tree, this layer is a self-contained stand-in for a future ``clock_management_*``
+API. Everything is kept under this sample directory.
 
 Requirements
 ************
@@ -75,22 +78,17 @@ Sample Output
 
 .. code-block:: console
 
-   Clock-state concept demo (nRF54LM20B, request/release)
-   nRF54LM20B clock tree - consumer bindings from devicetree:
-     uarte: 2 state(s)
-       - xtal           producer=xo               rank= 0  16000000 Hz
-       - default        producer=(none/internal)  rank=10  16000000 Hz
-     ...
-   == Rank arbitration (consumer 'pdm') ==
-     best of 3 candidates -> 'pclk24m-xtal' (rank 0) via xo24m
-     applied 'pclk24m-xtal'
-   == Shared HFXO via request/release ==
-       HFXO is off  (initial)
-     uarte requests HFXO ...
-       HFXO is on  (after uarte request)
-     radio requests HFXO ...
-       HFXO is on  (after radio request)
-     uarte releases HFXO (radio still holds it) ...
-       HFXO is on  (after uarte release)
-     radio releases HFXO (last consumer) ...
-       HFXO is off  (after radio release)
+   == 1. uarte applies 'hfint' (rank 10) ==
+     [uarte hfint]
+       tree: HFXO=off XO24M=off LFCLK=off | HFCLK src=HFINT | LFCLK src=LFRC
+       uarte  wants hfint       -> effective HFINT     (16000000 Hz)
+   == 2. radio applies 'xtal' (rank 0) - shared HFCLK arbitration ==
+     [uarte hfint + radio xtal]
+       tree: HFXO=on XO24M=off LFCLK=off | HFCLK src=HFXO | LFCLK src=LFRC
+       uarte  wants hfint       -> effective HFXO      (16000000 Hz)
+       radio  wants xtal        -> effective HFXO      (32000000 Hz)
+   == 4. usbhs applies '24m' - XO24M forces HFXO, HFCLK upgrades ==
+     [uarte hfint + usbhs 24m]
+       tree: HFXO=on XO24M=on LFCLK=off | HFCLK src=HFXO | LFCLK src=LFRC
+       uarte  wants hfint       -> effective HFXO      (16000000 Hz)
+       usbhs  wants 24m         -> effective HFXO(24M) (24000000 Hz)

@@ -3,46 +3,30 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Models the nRF54LM20B clock tree as devicetree clock producers, wires the
- * relevant peripherals (consumers) to the producer signals they consume, and
- * describes the selectable configurations as clock-state nodes carrying a rank.
+ * Models the nRF54LM20B clock tree as devicetree clock producers and binds
+ * peripherals (consumers) to it via clock-state nodes. Each clock-state encodes
+ * a selection in the tree (a mux input or a gate setting) plus a rank. When a
+ * consumer applies a state, the clock-management layer resolves the whole path
+ * from the selected node up to its source and arbitrates shared nodes by rank.
  *
- * Everything here is local to this sample. The three producers that can be
- * driven at runtime (HFXO, XO24M, LFCLK) map to the existing split clock_control
- * devices &xo, &xo24m and &lfclk; the rest of the tree is descriptive.
- *
- *   Sources        Muxes / derived           Outputs (pclk*)      Consumers
- *   -------        ---------------           ---------------      ---------
+ *   Sources        Muxes / gate            Outputs (pclk*)      Consumers
+ *   -------        ------------            ---------------      ---------
  *   HFINT ---+
  *            +--> HFCLK (mux) --+--> PCLK32M --> RADIO, PDM, TDM
  *   HFXTAL --+                  +--> PCLK16M --> UARTE
  *      |                        +--> PCLK1M
  *      |                        +--> HCLKCORE -> CPU
- *      +--------> XO24M --------+--> PCLK24M --> USBHS, PDM
+ *      +--------> XO24M (gate)--+--> PCLK24M --> USBHS, PDM
  *   LFRC ----+
  *            +--> LFCLK (mux) --+--> PCLK32Ki -> GRTC
  *   LFXTAL --+   (SYNT from HFCLK)
  */
 
-/*
- * The runtime-controllable producers. Give them #clock-cells so they can be the
- * target of a clock-state `clocks` phandle and be resolved to a struct device.
- */
-&xo {
-	#clock-cells = <0>;
-};
-
-&xo24m {
-	#clock-cells = <0>;
-};
-
-&lfclk {
-	#clock-cells = <0>;
-};
+#include "clock_ids.h"
 
 / {
 	clocks {
-		/* --- Internal always-on sources (no runtime action needed) --- */
+		/* Internal always-on sources. */
 		hfint: hfint {
 			compatible = "fixed-clock";
 			#clock-cells = <0>;
@@ -57,208 +41,149 @@
 
 		/* HFXTAL (&hfxo) and LFXTAL (&lfxo) come from the SoC devicetree. */
 
-		/* --- HFCLK: mux(HFINT, HFXTAL) and its peripheral outputs --- */
+		/* HFCLK: mux(HFINT, HFXTAL). Feeds PCLK32M/16M/1M and HCLKCORE. */
 		hfclk: hfclk {
 			compatible = "clock-mux";
 			#clock-cells = <1>;
+			mgmt-id = <CLK_ID_HFCLK>;
 			input-sources = <&hfint &hfxo>;
 			clock-frequency = <DT_FREQ_M(128)>;
-
-			pclk32m_clk: pclk32m {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <DT_FREQ_M(32)>;
-
-				pclk32m_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-
-					pclk32m_xtal: clock-state-xtal {
-						compatible = "clock-state";
-						clocks = <&xo>;
-						clock-frequency = <DT_FREQ_M(32)>;
-						rank = <5>;
-					};
-
-					pclk32m_default: clock-state-default {
-						compatible = "clock-state";
-						clock-frequency = <DT_FREQ_M(32)>;
-						rank = <10>;
-					};
-				};
-			};
-
-			pclk16m_clk: pclk16m {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <DT_FREQ_M(16)>;
-
-				pclk16m_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-
-					pclk16m_xtal: clock-state-xtal {
-						compatible = "clock-state";
-						clocks = <&xo>;
-						clock-frequency = <DT_FREQ_M(16)>;
-						rank = <0>;
-					};
-
-					pclk16m_default: clock-state-default {
-						compatible = "clock-state";
-						clock-frequency = <DT_FREQ_M(16)>;
-						rank = <10>;
-					};
-				};
-			};
-
-			pclk1m_clk: pclk1m {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <DT_FREQ_M(1)>;
-
-				pclk1m_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-				};
-			};
-
-			hclkcore_clk: hclkcore {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <DT_FREQ_M(128)>;
-
-				hclkcore_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-
-					hclkcore_default: clock-state-default {
-						compatible = "clock-state";
-						clock-frequency = <DT_FREQ_M(128)>;
-						rank = <0>;
-					};
-				};
-			};
 		};
 
-		/* --- XO24M: derived from HFXTAL --- */
-		xo24m_clk: xo24m {
-			compatible = "fixed-clock";
-			#clock-cells = <0>;
+		/* XO24M: gate derived from HFXTAL. Feeds PCLK24M. */
+		xo24m_gate: xo24m-gate {
+			compatible = "clock-gate";
+			#clock-cells = <1>;
+			mgmt-id = <CLK_ID_XO24M>;
+			input = <&hfxo>;
 			clock-frequency = <DT_FREQ_M(24)>;
-
-			pclk24m_clk: pclk24m {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <DT_FREQ_M(24)>;
-
-				pclk24m_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-
-					pclk24m_xtal: clock-state-xtal {
-						compatible = "clock-state";
-						clocks = <&xo24m>;
-						clock-frequency = <DT_FREQ_M(24)>;
-						rank = <0>;
-					};
-				};
-			};
 		};
 
-		/* --- LFCLK: mux(LFRC, LFXTAL, SYNT-from-HFCLK) --- */
+		/* LFCLK: mux(LFRC, LFXTAL). Feeds PCLK32Ki. */
 		lfclk_mux: lfclk-mux {
 			compatible = "clock-mux";
 			#clock-cells = <1>;
-			input-sources = <&lfrc &lfxo &hfclk>;
+			mgmt-id = <CLK_ID_LFCLK>;
+			input-sources = <&lfrc &lfxo>;
 			clock-frequency = <32768>;
-
-			pclk32ki_clk: pclk32ki {
-				compatible = "fixed-clock";
-				#clock-cells = <0>;
-				clock-frequency = <32768>;
-
-				pclk32ki_out: clock-output {
-					compatible = "clock-output";
-					#clock-cells = <0>;
-
-					pclk32ki_xtal: clock-state-xtal {
-						compatible = "clock-state";
-						clocks = <&lfclk>;
-						clock-frequency = <32768>;
-						rank = <0>;
-					};
-
-					pclk32ki_rc: clock-state-rc {
-						compatible = "clock-state";
-						clock-frequency = <32768>;
-						rank = <10>;
-					};
-				};
-			};
 		};
 	};
 
-	/* --- Consumers: peripherals bound to producer signals via clock-states --- */
+	/* Selectable configurations (like pinctrl states), grouped for clarity. */
+	clock-states {
+		/* UARTE on PCLK16M: prefers HFXO, tolerates HFINT. */
+		uarte_xtal: uarte-xtal {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFXO>;
+			clock-frequency = <DT_FREQ_M(16)>;
+			rank = <0>;
+		};
+		uarte_hfint: uarte-hfint {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFINT>;
+			clock-frequency = <DT_FREQ_M(16)>;
+			rank = <10>;
+		};
+
+		/* RADIO on PCLK32M: requires HFXO. */
+		radio_xtal: radio-xtal {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFXO>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <0>;
+		};
+
+		/* TDM on PCLK32M: default (HFINT) is fine. */
+		tdm_default: tdm-default {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFINT>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <10>;
+		};
+
+		/* PDM: best on PCLK24M (XO24M), else PCLK32M xtal, else HFINT. */
+		pdm_24m: pdm-24m {
+			compatible = "clock-state";
+			clocks = <&xo24m_gate XO24M_ON>;
+			clock-frequency = <DT_FREQ_M(24)>;
+			rank = <0>;
+		};
+		pdm_32m_xtal: pdm-32m-xtal {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFXO>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <5>;
+		};
+		pdm_32m_default: pdm-32m-default {
+			compatible = "clock-state";
+			clocks = <&hfclk HFCLK_SRC_HFINT>;
+			clock-frequency = <DT_FREQ_M(32)>;
+			rank = <10>;
+		};
+
+		/* USBHS on PCLK24M: requires XO24M. */
+		usbhs_24m: usbhs-24m {
+			compatible = "clock-state";
+			clocks = <&xo24m_gate XO24M_ON>;
+			clock-frequency = <DT_FREQ_M(24)>;
+			rank = <0>;
+		};
+
+		/* GRTC on PCLK32Ki: prefers LFXTAL, tolerates LFRC. */
+		grtc_lfxo: grtc-lfxo {
+			compatible = "clock-state";
+			clocks = <&lfclk_mux LFCLK_SRC_LFXO>;
+			clock-frequency = <32768>;
+			rank = <0>;
+		};
+		grtc_lfrc: grtc-lfrc {
+			compatible = "clock-state";
+			clocks = <&lfclk_mux LFCLK_SRC_LFRC>;
+			clock-frequency = <32768>;
+			rank = <10>;
+		};
+	};
+
+	/* Consumers: peripherals bound to clock-states. */
 	clock-consumers {
 		uarte_consumer: uarte {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk16m_out>;
-			clock-output-names = "pclk16m";
-			clock-state-0 = <&pclk16m_xtal>;
-			clock-state-1 = <&pclk16m_default>;
-			clock-state-names = "xtal", "default";
+			clock-state-0 = <&uarte_xtal>;
+			clock-state-1 = <&uarte_hfint>;
+			clock-state-names = "xtal", "hfint";
 		};
 
 		radio_consumer: radio {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk32m_out>;
-			clock-output-names = "pclk32m";
-			clock-state-0 = <&pclk32m_xtal>;
+			clock-state-0 = <&radio_xtal>;
 			clock-state-names = "xtal";
 		};
 
 		tdm_consumer: tdm {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk32m_out>;
-			clock-output-names = "pclk32m";
-			clock-state-0 = <&pclk32m_default>;
+			clock-state-0 = <&tdm_default>;
 			clock-state-names = "default";
 		};
 
 		pdm_consumer: pdm {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk24m_out>, <&pclk32m_out>;
-			clock-output-names = "pclk24m", "pclk32m";
-			clock-state-0 = <&pclk24m_xtal>;
-			clock-state-1 = <&pclk32m_xtal>;
-			clock-state-2 = <&pclk32m_default>;
-			clock-state-names = "pclk24m-xtal", "pclk32m-xtal", "pclk32m-default";
+			clock-state-0 = <&pdm_24m>;
+			clock-state-1 = <&pdm_32m_xtal>;
+			clock-state-2 = <&pdm_32m_default>;
+			clock-state-names = "24m", "32m-xtal", "32m-default";
 		};
 
 		usbhs_consumer: usbhs {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk24m_out>;
-			clock-output-names = "pclk24m";
-			clock-state-0 = <&pclk24m_xtal>;
-			clock-state-names = "xtal";
+			clock-state-0 = <&usbhs_24m>;
+			clock-state-names = "24m";
 		};
 
 		grtc_consumer: grtc {
 			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&pclk32ki_out>;
-			clock-output-names = "pclk32ki";
-			clock-state-0 = <&pclk32ki_xtal>;
-			clock-state-1 = <&pclk32ki_rc>;
-			clock-state-names = "xtal", "rc";
-		};
-
-		cpu_consumer: cpu {
-			compatible = "zephyr,clock-consumer-demo";
-			clock-outputs = <&hclkcore_out>;
-			clock-output-names = "hclkcore";
-			clock-state-0 = <&hclkcore_default>;
-			clock-state-names = "default";
+			clock-state-0 = <&grtc_lfxo>;
+			clock-state-1 = <&grtc_lfrc>;
+			clock-state-names = "lfxo", "lfrc";
 		};
 	};
 };

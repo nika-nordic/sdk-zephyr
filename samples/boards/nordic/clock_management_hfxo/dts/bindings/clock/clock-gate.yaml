@@ -1,0 +1,32 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  A gateable clock derived from a single input. A clock-state enables/disables
+  it via a specifier cell (0 = off, non-zero = on). Enabling it implies its
+  input must be running, which the clock-management layer propagates upstream.
+
+compatible: "clock-gate"
+
+include: [base.yaml, clock-controller.yaml]
+
+properties:
+  "#clock-cells":
+    const: 1
+
+  mgmt-id:
+    type: int
+    required: true
+    description: Stable node id used by the clock-management layer (see clock_ids.h).
+
+  input:
+    type: phandle
+    required: true
+    description: The upstream clock this gate derives from.
+
+  clock-frequency:
+    type: int
+    description: Output frequency (Hz).
+
+clock-cells:
+  - source
